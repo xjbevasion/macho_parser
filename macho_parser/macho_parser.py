@@ -187,9 +187,7 @@ class MachO(object):
         for i in xrange(header.ncmds):
             lc = None
             if self._valid_pos(cur_pos + load_command_struct.size) is True:
-                print cur_pos, cur_pos+load_command_struct.size
                 lc = load_command._make(load_command_struct.unpack(self._mm[cur_pos : cur_pos + load_command_struct.size]))
-                size = load_command_struct.size
             else:
                 raise RuntimeError('The offset exceeds the end of the file')
             yield (cur_pos, cur_pos + load_command_struct.size, lc)
