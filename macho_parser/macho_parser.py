@@ -1,6 +1,6 @@
 from collections import namedtuple
 from struct import Struct
-import mmap
+import mmap, os
 
 """
 struct mach_header {
@@ -16,6 +16,8 @@ struct mach_header {
 #define MH_MAGIC        0xfeedface
 #define MH_CIGAM        0xcefaedfe
 """
+magic = namedtuple('magic', 'magic')
+magic_struct = Struct('I')
 mach_header = namedtuple('mach_header', 'magic cputype cpusubtype filetype ncmds sizeofcmds flags')
 mach_header_struct = Struct('IiiIIII')
 mh_magic = 0xfeedface
@@ -133,10 +135,12 @@ section_64_struct = Struct('16s16sQQIIIIIIII')
 class MachO(object):
     def __init__(self, filename):
         self._filename = filename
+        self._filesize = None
         self._rf = None
         self._mm = None
 
     def __enter__(self):
+        self._filesize = os.path.getsize(self._filename)
         self._rf = open(self._filename, 'rb')
         self._mm = mmap.mmap(self._rf.fileno(), 0, mmap.MAP_PRIVATE, mmap.PROT_READ)
         return self
@@ -147,8 +151,27 @@ class MachO(object):
         self._mm.close()
         self._rf.close()
 
+    def _valid_pos(self, pos):
+        return pos < self._filesize;
+
+    def _get_magic(self):
+        if self._valid_pos(4) is False:
+            return None
+        m = magic._make(magic_struct.unpack(self._mm[:4]))
+        return m
+
+    def is_macho(self):
+        m = self._get_magic()
+        if m == None:
+            return False
+        if m.magic == mh_magic or m.magic == mh_cigam or m.magic == mh_magic_64 or m.magic == mh_cigam_64:
+            return True
+        return False
+
     def _get_header(self):
         """return a 3-tuple (begin_pos, end_pos, header)."""
+        if self._valid_pos(mach_header_struct.size) is False:
+            return (0, 0, None);
         header = mach_header._make(mach_header_struct.unpack(self._mm[:mach_header_struct.size]))
         if header.magic == mh_magic_64 or header.magic == mh_cigam_64:
             return (0, mach_header_64_struct.size, mach_header_64._make(mach_header_64_struct.unpack(self._mm[:mach_header_64_struct.size])))
@@ -162,7 +185,13 @@ class MachO(object):
         """return a 3-tuple (begin_pos, end_pos, load_command)."""
         _, cur_pos, header = self._get_header()
         for i in xrange(header.ncmds):
-            lc = load_command._make(load_command_struct.unpack(self._mm[cur_pos : cur_pos + load_command_struct.size]))
+            lc = None
+            if self._valid_pos(cur_pos + load_command_struct.size) is True:
+                print cur_pos, cur_pos+load_command_struct.size
+                lc = load_command._make(load_command_struct.unpack(self._mm[cur_pos : cur_pos + load_command_struct.size]))
+                size = load_command_struct.size
+            else:
+                raise RuntimeError('The offset exceeds the end of the file')
             yield (cur_pos, cur_pos + load_command_struct.size, lc)
             cur_pos += lc.cmdsize
 
